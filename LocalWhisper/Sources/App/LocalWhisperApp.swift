@@ -25,9 +25,14 @@ struct LocalWhisperApp: App {
         let fm = FileManager.default
 
         // 1. Check environment variable (useful for dev/testing)
-        if let envPath = ProcessInfo.processInfo.environment["WHISPER_MODEL_PATH"],
-           fm.fileExists(atPath: envPath) {
-            return envPath
+        if let envPath = ProcessInfo.processInfo.environment["WHISPER_MODEL_PATH"] {
+            // Validate: must be an existing regular file with .bin extension
+            var isDir: ObjCBool = false
+            let exists = fm.fileExists(atPath: envPath, isDirectory: &isDir)
+            if exists, !isDir.boolValue, envPath.hasSuffix(".bin") {
+                return envPath
+            }
+            // Invalid WHISPER_MODEL_PATH — fall through to auto-discovery
         }
 
         // 2. Check models/ relative to the executable (covers swift run & open)

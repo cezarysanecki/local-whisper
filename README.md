@@ -80,6 +80,25 @@ Moduły **Audio** i **Transcription** nie zależą od SwiftUI – mogą być uż
 |---|---|
 | `WHISPER_MODEL_PATH` | Nadpisuje domyślną ścieżkę do modelu GGML |
 
+## Bezpieczeństwo
+
+### Sandbox
+
+Aplikacja działa **bez sandboxa** (`com.apple.security.app-sandbox = false`). Jest to celowa decyzja — sandbox uniemożliwiałby bezpośredni dostęp do modelu na dysku, uruchamianie `afplay` do debug playback, oraz przyszłą integrację z globalnym skrótem klawiszowym (`NSEvent.addGlobalMonitorForEvents`).
+
+To jest dopuszczalne, ponieważ aplikacja:
+- działa wyłącznie lokalnie, bez dostępu do sieci
+- nie przetwarza danych użytkownika poza nagraniami audio
+- czyści pliki tymczasowe przy starcie i zamknięciu
+
+Jeśli planujesz dystrybucję przez App Store, konieczne będzie włączenie sandboxa i adaptacja architektury.
+
+### Ochrona danych audio
+
+- Pliki tymczasowe mają uprawnienia `0600` (tylko właściciel)
+- Próbki audio są zerowane po transkrypcji (`memset` + `removeAll`)
+- Temp directory jest czyszczony przy starcie, zamknięciu i SIGTERM
+
 ## Przyszłe plany
 
 - [ ] Menu bar app z globalnym skrótem klawiszowym (np. `⌥ + Space`)

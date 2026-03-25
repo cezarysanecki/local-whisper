@@ -26,11 +26,16 @@ public enum WhisperError: LocalizedError, Sendable {
 ///
 /// This class is intentionally decoupled from any UI framework so it can be
 /// reused in a menu-bar app, global-hotkey daemon, or any other context.
+///
+/// Thread-safety: all access to the whisper context is serialized through
+/// `contextLock`. The class is `@unchecked Sendable` because `NSLock`
+/// provides the necessary synchronization that the compiler cannot verify.
 public final class WhisperTranscriber: @unchecked Sendable {
 
     // MARK: - Private
 
     private var context: OpaquePointer? // whisper_context *
+    private let contextLock = NSLock()
     private let language: String
     /// Stable C string for whisper params (must outlive whisper_full calls).
     private let languageCStr: UnsafeMutablePointer<CChar>
@@ -69,9 +74,12 @@ public final class WhisperTranscriber: @unchecked Sendable {
     }
 
     deinit {
+        contextLock.lock()
         if let context {
             whisper_free(context)
+            self.context = nil
         }
+        contextLock.unlock()
         free(languageCStr)
     }
 
@@ -80,10 +88,14 @@ public final class WhisperTranscriber: @unchecked Sendable {
     /// Transcribe PCM audio samples (16 kHz, mono, Float32) to text.
     ///
     /// This is a **synchronous, blocking** call. Run it on a background thread.
+    /// Thread-safe: serialized via `contextLock`.
     ///
     /// - Parameter samples: Audio samples in 16 kHz mono Float32 format.
     /// - Returns: The transcribed text.
     public func transcribe(samples: [Float]) throws -> String {
+        contextLock.lock()
+        defer { contextLock.unlock() }
+
         guard let context else {
             throw WhisperError.couldNotInitializeContext
         }

@@ -44,8 +44,11 @@ public final class AudioRecorder: @unchecked Sendable {
     private let targetSampleRate: Double = 16_000
     private var playbackProcess: Process?
 
-    /// Raw buffers captured at the native mic sample rate
+    /// Raw buffers captured at the native mic sample rate.
+    /// Protected by `rawBuffersLock` – the tap callback writes on the audio thread
+    /// while `stopRecording()` reads on the caller's thread.
     private var rawBuffers: [AVAudioPCMBuffer] = []
+    private let rawBuffersLock = NSLock()
     private var rawFormat: AVAudioFormat?
 
     /// Dedicated temp directory for audio files.
@@ -102,7 +105,9 @@ public final class AudioRecorder: @unchecked Sendable {
         }
 
         samples.removeAll()
+        rawBuffersLock.lock()
         rawBuffers.removeAll()
+        rawBuffersLock.unlock()
 
         let engine = AVAudioEngine()
         self.engine = engine
@@ -117,12 +122,13 @@ public final class AudioRecorder: @unchecked Sendable {
             guard let self else { return }
             guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameLength) else { return }
             copy.frameLength = buffer.frameLength
-            let src = buffer.floatChannelData!
-            let dst = copy.floatChannelData!
+            guard let src = buffer.floatChannelData, let dst = copy.floatChannelData else { return }
             for ch in 0..<Int(buffer.format.channelCount) {
                 dst[ch].update(from: src[ch], count: Int(buffer.frameLength))
             }
+            self.rawBuffersLock.lock()
             self.rawBuffers.append(copy)
+            self.rawBuffersLock.unlock()
         }
 
         engine.prepare()
@@ -140,15 +146,24 @@ public final class AudioRecorder: @unchecked Sendable {
         engine = nil
         state = .idle
 
-        // Convert captured raw buffers to 16 kHz mono Float32
-        guard let rawFormat, !rawBuffers.isEmpty else { return samples }
+        // Safely take ownership of raw buffers (tap callback is already removed)
+        rawBuffersLock.lock()
+        let capturedBuffers = rawBuffers
+        rawBuffers.removeAll()
+        rawBuffersLock.unlock()
 
-        let targetFormat = AVAudioFormat(
+        // Convert captured raw buffers to 16 kHz mono Float32
+        guard let rawFormat, !capturedBuffers.isEmpty else { return samples }
+
+        guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: targetSampleRate,
             channels: 1,
             interleaved: false
-        )!
+        ) else {
+            state = .error("Failed to create target audio format")
+            return samples
+        }
 
         guard let converter = AVAudioConverter(from: rawFormat, to: targetFormat) else {
             state = .error("Failed to create audio converter")
@@ -157,7 +172,7 @@ public final class AudioRecorder: @unchecked Sendable {
 
         // Calculate total frame count in target sample rate
         var totalInputFrames: AVAudioFrameCount = 0
-        for buf in rawBuffers {
+        for buf in capturedBuffers {
             totalInputFrames += buf.frameLength
         }
 
@@ -172,18 +187,24 @@ public final class AudioRecorder: @unchecked Sendable {
             return samples
         }
 
-        // Feed all raw buffers through the converter
-        nonisolated(unsafe) var bufferIndex = 0
+        // Feed all raw buffers through the converter.
+        // The callback is invoked synchronously within `converter.convert(...)`,
+        // so shared mutable state is safe. We wrap the index in a class to satisfy
+        // Swift 6's @Sendable closure checking without `nonisolated(unsafe)`.
+        final class BufferCursor: @unchecked Sendable {
+            var index = 0
+        }
+        let cursor = BufferCursor()
         var error: NSError?
 
         converter.convert(to: outputBuffer, error: &error) { _, outStatus in
-            if bufferIndex >= self.rawBuffers.count {
+            if cursor.index >= capturedBuffers.count {
                 outStatus.pointee = .endOfStream
                 return nil
             }
             outStatus.pointee = .haveData
-            let buf = self.rawBuffers[bufferIndex]
-            bufferIndex += 1
+            let buf = capturedBuffers[cursor.index]
+            cursor.index += 1
             return buf
         }
 
@@ -203,9 +224,6 @@ public final class AudioRecorder: @unchecked Sendable {
         rawSamples = normalize(rawSamples)
 
         samples = rawSamples
-
-        // Free raw buffers
-        rawBuffers.removeAll()
 
         return samples
     }
@@ -229,12 +247,12 @@ public final class AudioRecorder: @unchecked Sendable {
     public func playRecordedAudio() throws {
         guard !samples.isEmpty else { return }
 
-        let format = AVAudioFormat(
+        guard let format = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: targetSampleRate,
             channels: 1,
             interleaved: false
-        )!
+        ) else { return }
 
         guard let buffer = AVAudioPCMBuffer(
             pcmFormat: format,
@@ -242,9 +260,11 @@ public final class AudioRecorder: @unchecked Sendable {
         ) else { return }
 
         buffer.frameLength = AVAudioFrameCount(samples.count)
-        let dst = buffer.floatChannelData!.pointee
+        guard let channelData = buffer.floatChannelData else { return }
+        let dst = channelData.pointee
         samples.withUnsafeBufferPointer { src in
-            dst.update(from: src.baseAddress!, count: samples.count)
+            guard let base = src.baseAddress else { return }
+            dst.update(from: base, count: samples.count)
         }
 
         // Write to a temporary WAV file and play it (single file, overwritten each time)
@@ -267,11 +287,15 @@ public final class AudioRecorder: @unchecked Sendable {
 
         // Stop any previous playback
         playbackProcess?.terminate()
+        playbackProcess = nil
 
         // Play via afplay (system utility, no UI dependency)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/afplay")
         process.arguments = [tmpURL.path]
+        process.terminationHandler = { [weak self] _ in
+            self?.playbackProcess = nil
+        }
         try process.run()
         playbackProcess = process
     }

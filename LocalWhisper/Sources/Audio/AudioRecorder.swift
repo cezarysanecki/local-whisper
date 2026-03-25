@@ -48,9 +48,31 @@ public final class AudioRecorder: @unchecked Sendable {
     private var rawBuffers: [AVAudioPCMBuffer] = []
     private var rawFormat: AVAudioFormat?
 
+    /// Dedicated temp directory for audio files.
+    private static let tempDirectory: URL = {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("local-whisper", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+
     // MARK: - Init
 
     public init() {}
+
+    // MARK: - Temp File Management
+
+    /// Remove all temporary audio files. Call on app launch and termination.
+    public static func cleanupTempFiles() {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(
+            at: tempDirectory,
+            includingPropertiesForKeys: nil
+        ) else { return }
+        for file in files {
+            try? fm.removeItem(at: file)
+        }
+    }
 
     // MARK: - Public API
 
@@ -186,6 +208,16 @@ public final class AudioRecorder: @unchecked Sendable {
         !samples.isEmpty
     }
 
+    /// Securely clear recorded samples from memory.
+    public func clearSamples() {
+        samples.withUnsafeMutableBufferPointer { buf in
+            if let base = buf.baseAddress {
+                memset(base, 0, buf.count * MemoryLayout<Float>.stride)
+            }
+        }
+        samples.removeAll()
+    }
+
     /// Play back the last recorded (and converted) audio through the speakers.
     public func playRecordedAudio() throws {
         guard !samples.isEmpty else { return }
@@ -209,8 +241,8 @@ public final class AudioRecorder: @unchecked Sendable {
         }
 
         // Write to a temporary WAV file and play it
-        let tmpURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("local-whisper-debug.wav")
+        let tmpURL = Self.tempDirectory
+            .appendingPathComponent("debug-\(UUID().uuidString.prefix(8)).wav")
 
         let audioFile = try AVAudioFile(
             forWriting: tmpURL,
@@ -219,6 +251,12 @@ public final class AudioRecorder: @unchecked Sendable {
             interleaved: false
         )
         try audioFile.write(from: buffer)
+
+        // Restrict file permissions to owner only
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: tmpURL.path
+        )
 
         // Stop any previous playback
         playbackProcess?.terminate()

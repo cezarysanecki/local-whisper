@@ -6,6 +6,7 @@ public enum WhisperError: LocalizedError, Sendable {
     case modelNotFound(String)
     case couldNotInitializeContext
     case transcriptionFailed
+    case memoryAllocationFailed
 
     public var errorDescription: String? {
         switch self {
@@ -15,6 +16,8 @@ public enum WhisperError: LocalizedError, Sendable {
             return "Failed to initialize whisper context – invalid or corrupted model file?"
         case .transcriptionFailed:
             return "whisper_full() returned an error during transcription"
+        case .memoryAllocationFailed:
+            return "Failed to allocate memory for language string"
         }
     }
 }
@@ -50,7 +53,10 @@ public final class WhisperTranscriber: @unchecked Sendable {
         }
 
         self.language = language
-        self.languageCStr = strdup(language)!
+        guard let cStr = strdup(language) else {
+            throw WhisperError.memoryAllocationFailed
+        }
+        self.languageCStr = cStr
 
         var params = whisper_context_default_params()
         params.flash_attn = true // enable flash attention on Apple Silicon

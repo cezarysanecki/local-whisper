@@ -115,6 +115,11 @@ public final class TranscriptionViewModel {
                 await MainActor.run {
                     self.transcribedText = text
                     self.state = .idle
+                    // Clear audio data from memory if playback is not needed
+                    if !self.debugPlayback {
+                        self.recorder.clearSamples()
+                        self.hasSamples = false
+                    }
                 }
             } catch {
                 await MainActor.run {

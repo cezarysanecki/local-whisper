@@ -1,8 +1,14 @@
 import SwiftUI
+import Audio
 import UI
 
 @main
 struct LocalWhisperApp: App {
+
+    init() {
+        // Clean up any temp files left over from a previous session
+        AudioRecorder.cleanupTempFiles()
+    }
 
     /// Path to the GGML model file.
     /// Looks for the model in the `models/` directory relative to the executable,
@@ -46,6 +52,9 @@ struct LocalWhisperApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(modelPath: modelPath)
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                    AudioRecorder.cleanupTempFiles()
+                }
         }
         .windowResizability(.contentSize)
     }

@@ -1,0 +1,96 @@
+import SwiftUI
+import Audio
+import Transcription
+
+/// Connects AudioRecorder and WhisperTranscriber to the UI.
+///
+/// This is the only place where Audio and Transcription modules meet.
+/// In the future, a menu-bar / global-hotkey controller can use the same
+/// AudioRecorder + WhisperTranscriber without touching this class.
+@MainActor
+@Observable
+public final class TranscriptionViewModel {
+
+    // MARK: - Public state
+
+    public enum State: Equatable {
+        case idle
+        case recording
+        case transcribing
+        case error(String)
+    }
+
+    public private(set) var state: State = .idle
+    public private(set) var transcribedText: String = ""
+
+    // MARK: - Private
+
+    private let recorder = AudioRecorder()
+    private var transcriber: WhisperTranscriber?
+    private let modelPath: String
+
+    // MARK: - Init
+
+    public init(modelPath: String) {
+        self.modelPath = modelPath
+    }
+
+    // MARK: - Public API
+
+    /// Toggle recording: if idle, start recording; if recording, stop and transcribe.
+    public func toggleRecording() {
+        switch state {
+        case .idle, .error:
+            startRecording()
+        case .recording:
+            stopAndTranscribe()
+        case .transcribing:
+            break // ignore taps while transcribing
+        }
+    }
+
+    // MARK: - Private
+
+    private func startRecording() {
+        do {
+            try recorder.startRecording()
+            state = .recording
+        } catch {
+            state = .error("Failed to start recording: \(error.localizedDescription)")
+        }
+    }
+
+    private func stopAndTranscribe() {
+        let samples = recorder.stopRecording()
+        state = .transcribing
+
+        guard !samples.isEmpty else {
+            state = .error("No audio recorded")
+            return
+        }
+
+        Task.detached { [modelPath] in
+            do {
+                // Lazy-init transcriber on first use (model loading is slow)
+                let transcriber: WhisperTranscriber
+                if let existing = await self.transcriber {
+                    transcriber = existing
+                } else {
+                    transcriber = try WhisperTranscriber(modelPath: modelPath)
+                    await MainActor.run { self.transcriber = transcriber }
+                }
+
+                let text = try transcriber.transcribe(samples: samples)
+
+                await MainActor.run {
+                    self.transcribedText = text
+                    self.state = .idle
+                }
+            } catch {
+                await MainActor.run {
+                    self.state = .error(error.localizedDescription)
+                }
+            }
+        }
+    }
+}

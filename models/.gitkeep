@@ -1,0 +1,7 @@
+# Models directory
+
+Place your converted GGML model file here.
+
+See `scripts/convert_model.py` for conversion instructions.
+
+The model file (`ggml-whisper-small-pl.bin`) is excluded from git via `.gitignore`.

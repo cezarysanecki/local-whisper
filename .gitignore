@@ -1,0 +1,32 @@
+# Xcode
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+build/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xccheckout
+*.moved-aside
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Models (too large for git)
+models/*.bin
+models/*.mlmodel
+models/*.mlmodelc
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Frameworks (too large for git, downloaded separately)
+LocalWhisper/Frameworks/
+
+# Xcode build
+xcuserdata/

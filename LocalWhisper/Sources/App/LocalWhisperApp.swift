@@ -8,6 +8,12 @@ struct LocalWhisperApp: App {
     init() {
         // Clean up any temp files left over from a previous session
         AudioRecorder.cleanupTempFiles()
+
+        // Also clean up on SIGTERM (e.g. kill from terminal)
+        signal(SIGTERM) { _ in
+            AudioRecorder.cleanupTempFiles()
+            exit(0)
+        }
     }
 
     /// Path to the GGML model file.

@@ -188,12 +188,7 @@ public final class AudioRecorder: @unchecked Sendable {
 
     /// Play back the last recorded (and converted) audio through the speakers.
     public func playRecordedAudio() throws {
-        guard !samples.isEmpty else {
-            print("[AudioRecorder] playRecordedAudio: no samples")
-            return
-        }
-
-        print("[AudioRecorder] playRecordedAudio: \(samples.count) samples (\(Double(samples.count) / targetSampleRate)s)")
+        guard !samples.isEmpty else { return }
 
         let format = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -205,10 +200,7 @@ public final class AudioRecorder: @unchecked Sendable {
         guard let buffer = AVAudioPCMBuffer(
             pcmFormat: format,
             frameCapacity: AVAudioFrameCount(samples.count)
-        ) else {
-            print("[AudioRecorder] playRecordedAudio: failed to create buffer")
-            return
-        }
+        ) else { return }
 
         buffer.frameLength = AVAudioFrameCount(samples.count)
         let dst = buffer.floatChannelData!.pointee
@@ -228,8 +220,6 @@ public final class AudioRecorder: @unchecked Sendable {
         )
         try audioFile.write(from: buffer)
 
-        print("[AudioRecorder] WAV written to \(tmpURL.path), size: \(try? FileManager.default.attributesOfItem(atPath: tmpURL.path)[.size] ?? 0)")
-
         // Stop any previous playback
         playbackProcess?.terminate()
 
@@ -239,7 +229,6 @@ public final class AudioRecorder: @unchecked Sendable {
         process.arguments = [tmpURL.path]
         try process.run()
         playbackProcess = process
-        print("[AudioRecorder] afplay started, pid: \(process.processIdentifier)")
     }
 
     // MARK: - Audio Processing
@@ -306,8 +295,6 @@ public final class AudioRecorder: @unchecked Sendable {
         // Gate threshold: 1.5x the noise floor (gentle, to avoid clipping speech)
         let threshold = max(noiseFloor * 1.5, 1e-5)
 
-        print("[AudioRecorder] Noise gate: floor=\(noiseFloor), threshold=\(threshold), frames=\(frameCount)")
-
         var output = samples
         output.withUnsafeMutableBufferPointer { ptr in
             let base = ptr.baseAddress!
@@ -339,8 +326,6 @@ public final class AudioRecorder: @unchecked Sendable {
 
         let gain = targetPeak / peak
         guard gain > 1.01 else { return samples } // already loud enough
-
-        print("[AudioRecorder] Normalize: peak=\(peak), gain=\(String(format: "%.1f", gain))x")
 
         var output = samples
         var g = gain

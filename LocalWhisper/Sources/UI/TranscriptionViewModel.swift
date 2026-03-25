@@ -24,9 +24,12 @@ public final class TranscriptionViewModel {
     public private(set) var transcribedText: String = ""
     public private(set) var hasSamples: Bool = false
 
-    /// Whether the last recording can be played back (for debugging).
+    /// Set to `true` to show the playback button in the UI (for debugging audio capture).
+    public var debugPlayback: Bool = false
+
+    /// Whether the last recording can be played back.
     public var canPlayback: Bool {
-        hasSamples && state == .idle
+        debugPlayback && hasSamples && state == .idle
     }
 
     // MARK: - Private

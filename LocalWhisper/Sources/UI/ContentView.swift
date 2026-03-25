@@ -38,13 +38,15 @@ public struct ContentView: View {
                     .disabled(viewModel.state == .transcribing)
                     .keyboardShortcut(.space, modifiers: [])
 
-                    Button(action: { viewModel.playRecordedAudio() }) {
-                        Label("Odtwórz", systemImage: "play.circle")
-                            .font(.title3)
-                            .padding(.vertical, 8)
+                    if viewModel.debugPlayback {
+                        Button(action: { viewModel.playRecordedAudio() }) {
+                            Label("Odtwórz", systemImage: "play.circle")
+                                .font(.title3)
+                                .padding(.vertical, 8)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!viewModel.canPlayback)
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(!viewModel.canPlayback)
                 }
             }
         }

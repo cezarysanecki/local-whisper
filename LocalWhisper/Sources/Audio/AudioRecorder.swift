@@ -65,13 +65,20 @@ public final class AudioRecorder: @unchecked Sendable {
     /// Remove all temporary audio files. Call on app launch and termination.
     public static func cleanupTempFiles() {
         let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(
+
+        // Clean dedicated temp directory
+        if let files = try? fm.contentsOfDirectory(
             at: tempDirectory,
             includingPropertiesForKeys: nil
-        ) else { return }
-        for file in files {
-            try? fm.removeItem(at: file)
+        ) {
+            for file in files {
+                try? fm.removeItem(at: file)
+            }
         }
+
+        // Clean legacy temp file from older versions
+        let legacyFile = fm.temporaryDirectory.appendingPathComponent("local-whisper-debug.wav")
+        try? fm.removeItem(at: legacyFile)
     }
 
     // MARK: - Public API
@@ -240,9 +247,9 @@ public final class AudioRecorder: @unchecked Sendable {
             dst.update(from: src.baseAddress!, count: samples.count)
         }
 
-        // Write to a temporary WAV file and play it
+        // Write to a temporary WAV file and play it (single file, overwritten each time)
         let tmpURL = Self.tempDirectory
-            .appendingPathComponent("debug-\(UUID().uuidString.prefix(8)).wav")
+            .appendingPathComponent("playback.wav")
 
         let audioFile = try AVAudioFile(
             forWriting: tmpURL,

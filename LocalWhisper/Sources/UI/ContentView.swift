@@ -26,20 +26,33 @@ public struct ContentView: View {
             VStack(spacing: 12) {
                 statusView
 
-                Button(action: { viewModel.toggleRecording() }) {
-                    Label(buttonTitle, systemImage: buttonIcon)
-                        .font(.title3)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
+                HStack(spacing: 12) {
+                    Button(action: { viewModel.toggleRecording() }) {
+                        Label(buttonTitle, systemImage: buttonIcon)
+                            .font(.title3)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(buttonTint)
+                    .disabled(viewModel.state == .transcribing)
+                    .keyboardShortcut(.space, modifiers: [])
+
+                    Button(action: { viewModel.playRecordedAudio() }) {
+                        Label("Odtwórz", systemImage: "play.circle")
+                            .font(.title3)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!viewModel.canPlayback)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(buttonTint)
-                .disabled(viewModel.state == .transcribing)
-                .keyboardShortcut(.space, modifiers: [])
             }
         }
         .padding()
         .frame(minWidth: 400, minHeight: 350)
+        .onAppear {
+            viewModel.requestMicrophoneAccess()
+        }
     }
 
     // MARK: - Subviews

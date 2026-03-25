@@ -23,6 +23,11 @@ public final class TranscriptionViewModel {
     public private(set) var state: State = .idle
     public private(set) var transcribedText: String = ""
 
+    /// Whether the last recording can be played back (for debugging).
+    public var canPlayback: Bool {
+        recorder.hasSamples && state == .idle
+    }
+
     // MARK: - Private
 
     private let recorder = AudioRecorder()
@@ -36,6 +41,25 @@ public final class TranscriptionViewModel {
     }
 
     // MARK: - Public API
+
+    /// Request microphone permission. Call on app appear.
+    public func requestMicrophoneAccess() {
+        Task {
+            let granted = await AudioRecorder.requestPermission()
+            if !granted {
+                state = .error("Microphone access denied. Grant permission in System Settings > Privacy & Security > Microphone.")
+            }
+        }
+    }
+
+    /// Play back the last recording through speakers (debugging aid).
+    public func playRecordedAudio() {
+        do {
+            try recorder.playRecordedAudio()
+        } catch {
+            state = .error("Playback failed: \(error.localizedDescription)")
+        }
+    }
 
     /// Toggle recording: if idle, start recording; if recording, stop and transcribe.
     public func toggleRecording() {

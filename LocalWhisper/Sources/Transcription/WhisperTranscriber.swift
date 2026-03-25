@@ -29,6 +29,8 @@ public final class WhisperTranscriber: @unchecked Sendable {
 
     private var context: OpaquePointer? // whisper_context *
     private let language: String
+    /// Stable C string for whisper params (must outlive whisper_full calls).
+    private let languageCStr: UnsafeMutablePointer<CChar>
 
     /// Maximum threads to use for inference.
     private var maxThreads: Int {
@@ -48,6 +50,7 @@ public final class WhisperTranscriber: @unchecked Sendable {
         }
 
         self.language = language
+        self.languageCStr = strdup(language)!
 
         var params = whisper_context_default_params()
         params.flash_attn = true // enable flash attention on Apple Silicon
@@ -63,6 +66,7 @@ public final class WhisperTranscriber: @unchecked Sendable {
         if let context {
             whisper_free(context)
         }
+        free(languageCStr)
     }
 
     // MARK: - Public API
@@ -86,10 +90,8 @@ public final class WhisperTranscriber: @unchecked Sendable {
         params.no_context = true
         params.single_segment = false
 
-        // Set language
-        language.withCString { cStr in
-            params.language = cStr
-        }
+        // Set language (use stable pointer – withCString creates a dangling pointer)
+        params.language = UnsafePointer(languageCStr)
 
         let result = samples.withUnsafeBufferPointer { buf in
             whisper_full(context, params, buf.baseAddress, Int32(buf.count))

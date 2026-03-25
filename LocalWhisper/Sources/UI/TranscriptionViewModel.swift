@@ -22,10 +22,11 @@ public final class TranscriptionViewModel {
 
     public private(set) var state: State = .idle
     public private(set) var transcribedText: String = ""
+    public private(set) var hasSamples: Bool = false
 
     /// Whether the last recording can be played back (for debugging).
     public var canPlayback: Bool {
-        recorder.hasSamples && state == .idle
+        hasSamples && state == .idle
     }
 
     // MARK: - Private
@@ -77,6 +78,7 @@ public final class TranscriptionViewModel {
 
     private func startRecording() {
         do {
+            hasSamples = false
             try recorder.startRecording()
             state = .recording
         } catch {
@@ -86,6 +88,7 @@ public final class TranscriptionViewModel {
 
     private func stopAndTranscribe() {
         let samples = recorder.stopRecording()
+        hasSamples = !samples.isEmpty
         state = .transcribing
 
         guard !samples.isEmpty else {

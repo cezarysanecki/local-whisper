@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+import Accelerate
 import Foundation
 
 /// Records audio from the system microphone using AVAudioEngine.
@@ -41,7 +42,7 @@ public final class AudioRecorder: @unchecked Sendable {
 
     private var engine: AVAudioEngine?
     private let targetSampleRate: Double = 16_000
-    private var player: AVAudioPlayer?
+    private var playbackProcess: Process?
 
     /// Raw buffers captured at the native mic sample rate
     private var rawBuffers: [AVAudioPCMBuffer] = []
@@ -81,10 +82,18 @@ public final class AudioRecorder: @unchecked Sendable {
         let nativeFormat = inputNode.outputFormat(forBus: 0)
         rawFormat = nativeFormat
 
-        // Tap in the native mic format – no conversion issues
+        // Tap in the native mic format – no conversion issues.
+        // IMPORTANT: We must copy each buffer because the callback reuses the same memory.
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
             guard let self else { return }
-            self.rawBuffers.append(buffer)
+            guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameLength) else { return }
+            copy.frameLength = buffer.frameLength
+            let src = buffer.floatChannelData!
+            let dst = copy.floatChannelData!
+            for ch in 0..<Int(buffer.format.channelCount) {
+                dst[ch].update(from: src[ch], count: Int(buffer.frameLength))
+            }
+            self.rawBuffers.append(copy)
         }
 
         engine.prepare()
@@ -157,7 +166,14 @@ public final class AudioRecorder: @unchecked Sendable {
         // Extract Float32 samples
         guard let channelData = outputBuffer.floatChannelData else { return samples }
         let count = Int(outputBuffer.frameLength)
-        samples = Array(UnsafeBufferPointer(start: channelData.pointee, count: count))
+        var rawSamples = Array(UnsafeBufferPointer(start: channelData.pointee, count: count))
+
+        // Post-processing: reduce background noise
+        rawSamples = applyHighPassFilter(rawSamples, sampleRate: targetSampleRate, cutoffHz: 80)
+        rawSamples = applyNoiseGate(rawSamples, sampleRate: targetSampleRate)
+        rawSamples = normalize(rawSamples)
+
+        samples = rawSamples
 
         // Free raw buffers
         rawBuffers.removeAll()
@@ -172,7 +188,12 @@ public final class AudioRecorder: @unchecked Sendable {
 
     /// Play back the last recorded (and converted) audio through the speakers.
     public func playRecordedAudio() throws {
-        guard !samples.isEmpty else { return }
+        guard !samples.isEmpty else {
+            print("[AudioRecorder] playRecordedAudio: no samples")
+            return
+        }
+
+        print("[AudioRecorder] playRecordedAudio: \(samples.count) samples (\(Double(samples.count) / targetSampleRate)s)")
 
         let format = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -184,7 +205,10 @@ public final class AudioRecorder: @unchecked Sendable {
         guard let buffer = AVAudioPCMBuffer(
             pcmFormat: format,
             frameCapacity: AVAudioFrameCount(samples.count)
-        ) else { return }
+        ) else {
+            print("[AudioRecorder] playRecordedAudio: failed to create buffer")
+            return
+        }
 
         buffer.frameLength = AVAudioFrameCount(samples.count)
         let dst = buffer.floatChannelData!.pointee
@@ -204,7 +228,125 @@ public final class AudioRecorder: @unchecked Sendable {
         )
         try audioFile.write(from: buffer)
 
-        player = try AVAudioPlayer(contentsOf: tmpURL)
-        player?.play()
+        print("[AudioRecorder] WAV written to \(tmpURL.path), size: \(try? FileManager.default.attributesOfItem(atPath: tmpURL.path)[.size] ?? 0)")
+
+        // Stop any previous playback
+        playbackProcess?.terminate()
+
+        // Play via afplay (system utility, no UI dependency)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/afplay")
+        process.arguments = [tmpURL.path]
+        try process.run()
+        playbackProcess = process
+        print("[AudioRecorder] afplay started, pid: \(process.processIdentifier)")
+    }
+
+    // MARK: - Audio Processing
+
+    /// Second-order Butterworth high-pass filter to remove low-frequency rumble.
+    private func applyHighPassFilter(_ samples: [Float], sampleRate: Double, cutoffHz: Double) -> [Float] {
+        guard samples.count > 2 else { return samples }
+
+        // Compute second-order Butterworth high-pass coefficients
+        let w0 = 2.0 * Double.pi * cutoffHz / sampleRate
+        let alpha = sin(w0) / (2.0 * sqrt(2.0)) // Q = sqrt(2)/2 for Butterworth
+
+        let b0 = Float((1.0 + cos(w0)) / 2.0 / (1.0 + alpha))
+        let b1 = Float(-(1.0 + cos(w0)) / (1.0 + alpha))
+        let b2 = b0
+        let a1 = Float(-2.0 * cos(w0) / (1.0 + alpha))
+        let a2 = Float((1.0 - alpha) / (1.0 + alpha))
+
+        var output = [Float](repeating: 0, count: samples.count)
+
+        // Direct Form II transposed
+        var z1: Float = 0
+        var z2: Float = 0
+
+        for i in 0..<samples.count {
+            let x = samples[i]
+            let y = b0 * x + z1
+            z1 = b1 * x - a1 * y + z2
+            z2 = b2 * x - a2 * y
+            output[i] = y
+        }
+
+        return output
+    }
+
+    /// Noise gate: estimates noise floor from the quietest portions and gates below threshold.
+    ///
+    /// Works in frames (~20ms). Measures RMS per frame, finds the noise floor,
+    /// then smoothly attenuates frames whose RMS is close to the noise floor.
+    private func applyNoiseGate(_ samples: [Float], sampleRate: Double) -> [Float] {
+        guard samples.count > 0 else { return samples }
+
+        let frameSize = Int(sampleRate * 0.02) // 20ms frames
+        let frameCount = samples.count / frameSize
+        guard frameCount > 2 else { return samples }
+
+        // Calculate RMS for each frame
+        var rmsValues = [Float](repeating: 0, count: frameCount)
+        samples.withUnsafeBufferPointer { ptr in
+            let base = ptr.baseAddress!
+            for i in 0..<frameCount {
+                let offset = i * frameSize
+                var sumSq: Float = 0
+                vDSP_svesq(base + offset, 1, &sumSq, vDSP_Length(frameSize))
+                rmsValues[i] = sqrt(sumSq / Float(frameSize))
+            }
+        }
+
+        // Estimate noise floor: median of the lowest 20% of frame RMS values
+        let sorted = rmsValues.sorted()
+        let lowCount = max(1, frameCount / 5)
+        let noiseFloor = sorted[lowCount - 1]
+
+        // Gate threshold: 1.5x the noise floor (gentle, to avoid clipping speech)
+        let threshold = max(noiseFloor * 1.5, 1e-5)
+
+        print("[AudioRecorder] Noise gate: floor=\(noiseFloor), threshold=\(threshold), frames=\(frameCount)")
+
+        var output = samples
+        output.withUnsafeMutableBufferPointer { ptr in
+            let base = ptr.baseAddress!
+            for i in 0..<frameCount {
+                let rms = rmsValues[i]
+                let offset = i * frameSize
+
+                if rms < threshold {
+                    // Below threshold: soft gate (attenuate proportionally)
+                    var gain = max(0, (rms / threshold))
+                    vDSP_vsmul(base + offset, 1, &gain, base + offset, 1, vDSP_Length(frameSize))
+                }
+                // Above threshold: pass through unchanged
+            }
+        }
+
+        // Handle remaining samples (tail shorter than one frame) – pass through
+        return output
+    }
+
+    /// Peak-normalize audio to ~0.95 full scale so quiet recordings are boosted.
+    private func normalize(_ samples: [Float], targetPeak: Float = 0.95) -> [Float] {
+        guard !samples.isEmpty else { return samples }
+
+        var peak: Float = 0
+        vDSP_maxmgv(samples, 1, &peak, vDSP_Length(samples.count))
+
+        guard peak > 1e-6 else { return samples } // silence, don't amplify noise
+
+        let gain = targetPeak / peak
+        guard gain > 1.01 else { return samples } // already loud enough
+
+        print("[AudioRecorder] Normalize: peak=\(peak), gain=\(String(format: "%.1f", gain))x")
+
+        var output = samples
+        var g = gain
+        output.withUnsafeMutableBufferPointer { ptr in
+            vDSP_vsmul(ptr.baseAddress!, 1, &g, ptr.baseAddress!, 1, vDSP_Length(ptr.count))
+        }
+        return output
     }
 }

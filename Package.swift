@@ -17,7 +17,8 @@ let package = Package(
                 "Transcription",
                 "UI"
             ],
-            path: "LocalWhisper/Sources/App"
+            path: "LocalWhisper/Sources/App",
+            exclude: ["Info.plist", "LocalWhisper.entitlements"]
         ),
         .target(
             name: "Audio",

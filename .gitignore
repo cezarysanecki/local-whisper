@@ -28,5 +28,8 @@ models/*.mlmodelc
 # Frameworks (too large for git, downloaded separately)
 LocalWhisper/Frameworks/
 
+# Model conversion temp files
+.model-conversion-tmp/
+
 # Xcode build
 xcuserdata/

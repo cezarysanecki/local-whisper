@@ -35,7 +35,16 @@ struct LocalWhisperApp: App {
             // Invalid WHISPER_MODEL_PATH — fall through to auto-discovery
         }
 
-        // 2. Check models/ relative to the executable (covers swift run & open)
+        // 2. Check inside the .app bundle (Contents/Resources/models/)
+        if let resourceURL = Bundle.main.resourceURL {
+            let bundlePath = resourceURL
+                .appendingPathComponent("models/\(modelFileName)").path
+            if fm.fileExists(atPath: bundlePath) {
+                return bundlePath
+            }
+        }
+
+        // 3. Check models/ relative to the executable (covers swift run & open)
         let executableURL = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
         let execDir = executableURL.deletingLastPathComponent()
 
@@ -50,13 +59,13 @@ struct LocalWhisperApp: App {
             searchDir = searchDir.deletingLastPathComponent()
         }
 
-        // 3. Check models/ relative to the current working directory
+        // 4. Check models/ relative to the current working directory
         let cwdPath = fm.currentDirectoryPath + "/models/\(modelFileName)"
         if fm.fileExists(atPath: cwdPath) {
             return cwdPath
         }
 
-        // 4. Fallback – will show an error in the UI when transcription is attempted
+        // 5. Fallback – will show an error in the UI when transcription is attempted
         return cwdPath
     }()
 

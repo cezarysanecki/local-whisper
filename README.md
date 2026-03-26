@@ -40,7 +40,20 @@ brew install git-lfs && git lfs install
 
 Skrypt pobiera `bardsai/whisper-small-pl` z HuggingFace i konwertuje do formatu GGML. Wynikowy plik: `models/ggml-whisper-small-pl.bin` (~466 MB).
 
-### 3. Zbuduj i uruchom
+### 3. Zainstaluj jako aplikację macOS
+
+```bash
+./scripts/install.sh
+```
+
+Skrypt buduje release binary, pakuje go w `Local Whisper.app` (z modelem i frameworkiem w środku) i instaluje w `/Applications/`. Po instalacji możesz uruchamiać jak każdą inną aplikację — z Launchpada, Spotlighta, lub Docku.
+
+Alternatywna lokalizacja:
+```bash
+./scripts/install.sh ~/Desktop
+```
+
+### Alternatywa: uruchom z terminala (bez instalacji)
 
 ```bash
 swift build

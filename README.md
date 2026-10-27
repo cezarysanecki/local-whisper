@@ -1,120 +1,120 @@
 # Local Whisper
 
-Natywna aplikacja macOS do transkrypcji polskiego języka mówionego, działająca w pełni offline. Używa modelu [bardsai/whisper-small-pl](https://huggingface.co/bardsai/whisper-small-pl) uruchamianego lokalnie przez [whisper.cpp](https://github.com/ggerganov/whisper.cpp).
+A native macOS app that transcribes spoken Polish fully offline. It runs the [bardsai/whisper-small-pl](https://huggingface.co/bardsai/whisper-small-pl) model locally through [whisper.cpp](https://github.com/ggerganov/whisper.cpp). The interface is in Polish 🇵🇱 PL.
 
-## Wymagania
+## Requirements
 
-- macOS 14+ (Sonoma)
-- Xcode 16+ (lub Command Line Tools)
-- Python 3.8+ (do konwersji modelu)
-- ~500 MB wolnego miejsca na dysku (model)
+- macOS 14 (Sonoma) or newer
+- Xcode 16 or newer (or the Command Line Tools)
+- Python 3.8 or newer, to convert the model
+- about 500 MB of disk space for the model
 
-## Szybki start
+## Quick start
 
-### 1. Pobierz XCFramework whisper.cpp
+### 1. Download the whisper.cpp XCFramework
 
 ```bash
-# Pobierz ze strony releases whisper.cpp (v1.8.4)
+# Download from the whisper.cpp releases page (v1.8.4)
 curl -L -o /tmp/whisper-xcframework.zip \
   https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.4/whisper-v1.8.4-xcframework.zip
 
-# Rozpakuj do projektu
+# Unpack into the project
 mkdir -p LocalWhisper/Frameworks
 unzip /tmp/whisper-xcframework.zip -d LocalWhisper/Frameworks
 mv LocalWhisper/Frameworks/build-apple/whisper.xcframework LocalWhisper/Frameworks/
 rm -rf LocalWhisper/Frameworks/build-apple
 ```
 
-### 2. Skonwertuj model
+### 2. Convert the model
 
 ```bash
-# Zainstaluj zależności Pythona
+# Python dependencies
 pip install torch numpy transformers
 
-# Zainstaluj git-lfs (jeśli nie masz)
+# git-lfs, if you do not have it
 brew install git-lfs && git lfs install
 
-# Uruchom skrypt konwersji
+# Conversion
 ./scripts/convert_model.sh
 ```
 
-Skrypt pobiera `bardsai/whisper-small-pl` z HuggingFace i konwertuje do formatu GGML. Wynikowy plik: `models/ggml-whisper-small-pl.bin` (~466 MB).
+The script downloads `bardsai/whisper-small-pl` from Hugging Face and converts it to GGML. The result is `models/ggml-whisper-small-pl.bin` (about 466 MB).
 
-### 3. Zainstaluj jako aplikację macOS
+### 3. Install as a macOS app
 
 ```bash
 ./scripts/install.sh
 ```
 
-Skrypt buduje release binary, pakuje go w `Local Whisper.app` (z modelem i frameworkiem w środku) i instaluje w `/Applications/`. Po instalacji możesz uruchamiać jak każdą inną aplikację — z Launchpada, Spotlighta, lub Docku.
+The script builds a release binary, packs it into `Local Whisper.app` together with the model and the framework, and installs it in `/Applications/`. After that it starts like any other app, from Launchpad, Spotlight or the Dock.
 
-Alternatywna lokalizacja:
+A different location:
 ```bash
 ./scripts/install.sh ~/Desktop
 ```
 
-### Alternatywa: uruchom z terminala (bez instalacji)
+### Alternative: run from the terminal without installing
 
 ```bash
 swift build
 swift run LocalWhisper
 ```
 
-Lub otwórz w Xcode:
+Or open it in Xcode:
 ```bash
 open Package.swift
 ```
 
-## Użytkowanie
+## Usage
 
-1. Kliknij **Nagrywaj** (lub naciśnij `Spacja`)
-2. Mów po polsku
-3. Kliknij **Zatrzymaj**
-4. Poczekaj na transkrypcję (pierwsze uruchomienie ładuje model, może potrwać kilka sekund)
-5. Tekst pojawi się w polu tekstowym
+1. Click **Nagrywaj** (record) or press `Space`.
+2. Speak Polish.
+3. Click **Zatrzymaj** (stop).
+4. Wait for the transcription. The first run loads the model, which can take a few seconds.
+5. The text appears in the text field.
 
-## Architektura
+## Architecture
 
 ```
 App (entry point)
  └── UI (SwiftUI: ContentView + ViewModel)
-      ├── Audio (AVAudioEngine, 16kHz mono Float32)
+      ├── Audio (AVAudioEngine, 16 kHz mono Float32)
       └── Transcription (whisper.cpp C API wrapper)
 ```
 
-Moduły **Audio** i **Transcription** nie zależą od SwiftUI – mogą być użyte niezależnie, np. w:
-- aplikacji menu bar
-- daemonie z globalnym skrótem klawiszowym
-- narzędziu CLI
+The **Audio** and **Transcription** modules do not depend on SwiftUI, so they can be reused, for example in:
+- a menu bar app,
+- a daemon with a global keyboard shortcut,
+- a CLI tool.
 
-## Zmienne środowiskowe
+## Environment variables
 
-| Zmienna | Opis |
+| Variable | Description |
 |---|---|
-| `WHISPER_MODEL_PATH` | Nadpisuje domyślną ścieżkę do modelu GGML |
+| `WHISPER_MODEL_PATH` | Overrides the default path to the GGML model |
 
-## Bezpieczeństwo
+## Security
 
 ### Sandbox
 
-Aplikacja działa **bez sandboxa** (`com.apple.security.app-sandbox = false`). Jest to celowa decyzja — sandbox uniemożliwiałby bezpośredni dostęp do modelu na dysku, uruchamianie `afplay` do debug playback, oraz przyszłą integrację z globalnym skrótem klawiszowym (`NSEvent.addGlobalMonitorForEvents`).
+The app runs **without the sandbox** (`com.apple.security.app-sandbox = false`). This is deliberate: the sandbox would block direct access to the model on disk, running `afplay` for debug playback, and a future global keyboard shortcut (`NSEvent.addGlobalMonitorForEvents`).
 
-To jest dopuszczalne, ponieważ aplikacja:
-- działa wyłącznie lokalnie, bez dostępu do sieci
-- nie przetwarza danych użytkownika poza nagraniami audio
-- czyści pliki tymczasowe przy starcie i zamknięciu
+That is acceptable because the app:
+- works only locally, with no network access,
+- processes no user data other than audio recordings,
+- removes temporary files on start and on exit.
 
-Jeśli planujesz dystrybucję przez App Store, konieczne będzie włączenie sandboxa i adaptacja architektury.
+Distribution through the App Store would require turning the sandbox on and adapting the architecture.
 
-### Ochrona danych audio
+### Audio data
 
-- Pliki tymczasowe mają uprawnienia `0600` (tylko właściciel)
-- Próbki audio są zerowane po transkrypcji (`memset` + `removeAll`)
-- Temp directory jest czyszczony przy starcie, zamknięciu i SIGTERM
+- Temporary files have `0600` permissions (owner only).
+- Audio samples are zeroed after transcription (`memset` and `removeAll`).
+- The temporary directory is cleaned on start, on exit and on SIGTERM.
 
-## Przyszłe plany
+## Plans
 
-- [ ] Menu bar app z globalnym skrótem klawiszowym (np. `⌥ + Space`)
-- [ ] Automatyczne wklejanie transkrypcji do aktywnej aplikacji
-- [ ] Streaming – transkrypcja w czasie rzeczywistym
-- [ ] Obsługa wielu języków
+- [ ] Menu bar app with a global shortcut (for example `⌥ + Space`)
+- [ ] Pasting the transcription into the active app
+- [ ] Streaming, real-time transcription
+- [ ] More languages

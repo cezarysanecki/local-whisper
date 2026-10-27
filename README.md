@@ -67,11 +67,11 @@ open Package.swift
 
 ## Usage
 
-1. Click **Nagrywaj** (record) or press `Space`.
+1. Click the microphone button or press `Space`.
 2. Speak Polish.
-3. Click **Zatrzymaj** (stop).
+3. Click the button again (or press `Space`) to stop.
 4. Wait for the transcription. The first run loads the model, which can take a few seconds.
-5. The text appears in the text field.
+5. The text appears in the text field, ready to copy.
 
 ## Architecture
 

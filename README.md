@@ -118,3 +118,7 @@ Distribution through the App Store would require turning the sandbox on and adap
 - [ ] Pasting the transcription into the active app
 - [ ] Streaming, real-time transcription
 - [ ] More languages
+
+## License
+
+MIT, see [`LICENSE`](LICENSE).
